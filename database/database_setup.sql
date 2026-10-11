@@ -31,7 +31,7 @@ CREATE TABLE `customers` (
   `type` enum('Retail','Corporate') DEFAULT 'Retail',
   `city` varchar(100) DEFAULT 'Pune',
   PRIMARY KEY (`customer_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -41,16 +41,6 @@ CREATE TABLE `customers` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `customers` WRITE;
 /*!40000 ALTER TABLE `customers` DISABLE KEYS */;
-INSERT INTO `customers` VALUES
-(1,'Walk-in Customer','0000000000','walkin@store.internal','Retail','Pune'),
-(2,'Arun Varma','+91 98765 43210','arun.varma@gmail.com','Retail','Pune'),
-(3,'Divya Nair','+91 98123 45678','divya.nair@outlook.com','Retail','Pune'),
-(4,'Acme Corp','+91 98450 11001','contact@acmecorp.com','Corporate','Hyderabad'),
-(5,'Bluewave Solutions','+91 98450 11002','contact@bluewave.io','Corporate','Pune'),
-(6,'Nova Retail','+91 98450 11003','contact@novaretail.com','Corporate','Delhi'),
-(7,'Sunrise Clinics','+91 98450 11004','contact@sunriseclinics.org','Corporate','Pune'),
-(8,'Orbit Logistics','+91 98450 11005','contact@orbitlogistics.in','Corporate','Mumbai'),
-(9,'Kiran Mehta','+91 98765 43210','kiran.mehta@gmail.com','Retail','Pune');
 /*!40000 ALTER TABLE `customers` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -67,7 +57,7 @@ CREATE TABLE `departments` (
   `dept_id` int(11) NOT NULL AUTO_INCREMENT,
   `dept_name` varchar(100) NOT NULL,
   PRIMARY KEY (`dept_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -79,13 +69,10 @@ LOCK TABLES `departments` WRITE;
 /*!40000 ALTER TABLE `departments` DISABLE KEYS */;
 INSERT INTO `departments` VALUES
 (1,'Sales'),
-(2,'Inventory'),
-(3,'Human Resources'),
-(4,'IT Support'),
-(5,'sales'),
-(6,'sales'),
-(8,'Sales'),
-(9,'sales');
+(2,'Finance'),
+(3,'Warehouse'),
+(4,'Operations'),
+(5,'Support');
 /*!40000 ALTER TABLE `departments` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -113,7 +100,7 @@ CREATE TABLE `employees` (
   UNIQUE KEY `email` (`email`),
   KEY `dept_id` (`dept_id`),
   CONSTRAINT `employees_ibfk_1` FOREIGN KEY (`dept_id`) REFERENCES `departments` (`dept_id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -124,10 +111,7 @@ SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `employees` WRITE;
 /*!40000 ALTER TABLE `employees` DISABLE KEYS */;
 INSERT INTO `employees` VALUES
-(1,'Priya Nair','employee@bizcore.dev','Operations Executive',1,NULL,NULL,45000.00,'2026-10-11','Active'),
-(2,'Rahul Sharma','rahul@bizcore.dev','Sales Lead',1,NULL,NULL,45000.00,'2026-10-11','Active'),
-(3,'Kiran Kumar','kiran@bizcore.dev','Inventory Manager',2,NULL,NULL,45000.00,'2026-10-11','Active'),
-(4,'Sneha Patil','sneha@bizcore.dev','HR Generalist',3,NULL,NULL,45000.00,'2026-10-11','Active');
+(1,'Priya Nair','employee@bizcore.dev','Head Cashier',1,2,NULL,45000.00,'2026-10-11','Active');
 /*!40000 ALTER TABLE `employees` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -151,7 +135,7 @@ CREATE TABLE `products` (
   `reorder_level` int(11) DEFAULT 10,
   `supplier_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`product_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -161,24 +145,6 @@ CREATE TABLE `products` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `products` WRITE;
 /*!40000 ALTER TABLE `products` DISABLE KEYS */;
-INSERT INTO `products` VALUES
-(1,'Lenovo ThinkPad E14 Laptop','Electronics',1100.00,6,'SKU-001',0.00,10,NULL),
-(2,'MacBook Air M2 Laptop','Electronics',1199.00,4,'SKU-001',0.00,10,NULL),
-(3,'LG 27\" 4K Monitor','Displays',450.00,9,'SKU-001',0.00,10,NULL),
-(4,'Mechanical Keyboard','Accessories',120.00,7,'SKU-001',0.00,10,NULL),
-(5,'Noise-Cancelling Headset','Audio',200.00,3,'SKU-001',0.00,10,NULL),
-(6,'Toner Cartridge 85A','Office Supplies',65.00,8,'SKU-001',0.00,10,NULL),
-(7,'24-Port Network Switch','Networking',350.00,4,'SKU-001',0.00,10,NULL),
-(8,'Standing Desk','Furniture',550.00,2,'SKU-001',0.00,10,NULL),
-(9,'Dell UltraSharp 32','Displays',720.00,18,'SKU-001',0.00,10,NULL),
-(10,'Logitech MX Master 3S','Accessories',99.00,25,'SKU-001',0.00,10,NULL),
-(11,'Ergonomic Office Chair','Furniture',320.00,14,'SKU-001',0.00,10,NULL),
-(12,'Cat6 Ethernet Cable (50m)','Networking',35.00,40,'SKU-001',0.00,10,NULL),
-(13,'USB-C 100W Hub','Accessories',45.00,30,'SKU-001',0.00,10,NULL),
-(14,'Samsung T7 1TB SSD','Storage',130.00,22,'SKU-001',0.00,10,NULL),
-(15,'Wireless Presenter Clicker','Accessories',25.00,15,'SKU-001',0.00,10,NULL),
-(16,'Smart Surge Protector','Hardware',40.00,17,'SKU-001',0.00,10,NULL),
-(17,'HP ELITEBOOK 840 G7','ELECTRONICS',56000.00,6,'001',50000.00,10,NULL);
 /*!40000 ALTER TABLE `products` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -237,7 +203,7 @@ CREATE TABLE `purchases` (
   PRIMARY KEY (`purchase_id`),
   KEY `supplier_id` (`supplier_id`),
   CONSTRAINT `purchases_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`supplier_id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -247,9 +213,6 @@ CREATE TABLE `purchases` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `purchases` WRITE;
 /*!40000 ALTER TABLE `purchases` DISABLE KEYS */;
-INSERT INTO `purchases` VALUES
-(1,1,'2026-10-01',4400.00,'Received',NULL,NULL,'PO-3001',1),
-(2,2,'2026-10-05',1100.00,'Received',NULL,NULL,'PO-3001',1);
 /*!40000 ALTER TABLE `purchases` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -273,7 +236,7 @@ CREATE TABLE `sale_items` (
   KEY `product_id` (`product_id`),
   CONSTRAINT `sale_items_ibfk_1` FOREIGN KEY (`sale_id`) REFERENCES `sales` (`sale_id`) ON DELETE CASCADE,
   CONSTRAINT `sale_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -283,14 +246,6 @@ CREATE TABLE `sale_items` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `sale_items` WRITE;
 /*!40000 ALTER TABLE `sale_items` DISABLE KEYS */;
-INSERT INTO `sale_items` VALUES
-(1,6,2,1,1199.00),
-(2,4,1,2,1100.00),
-(3,8,17,1,56000.00),
-(4,9,17,1,56000.00),
-(5,9,16,1,40.00),
-(6,10,17,1,56000.00),
-(7,10,16,1,40.00);
 /*!40000 ALTER TABLE `sale_items` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -318,7 +273,7 @@ CREATE TABLE `sales` (
   `tax` decimal(10,2) DEFAULT 0.00,
   `cashier_name` varchar(100) DEFAULT 'Staff',
   PRIMARY KEY (`sale_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -328,17 +283,6 @@ CREATE TABLE `sales` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `sales` WRITE;
 /*!40000 ALTER TABLE `sales` DISABLE KEYS */;
-INSERT INTO `sales` VALUES
-(1,'INV-5000','2026-10-10',267.00,'Card','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(2,'INV-5001','2026-10-10',198.00,'UPI','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(3,'INV-5002','2026-10-10',1145.00,'Wire','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(4,'INV-5003','2026-10-10',2730.00,'Card','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(5,'INV-5004','2026-10-10',200.00,'Cash','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(6,'INV-5032','2026-10-10',1199.00,'Card','completed','Walk-in Customer',NULL,0.00,0.00,0.00,0.00,'Staff'),
-(7,'INV-5007','2026-10-11',59167.50,'UPI ($59167.50)','completed','Arun Varma','[{\"method\":\"UPI\",\"amount\":59167.5}]',0.00,0.00,56350.00,2817.50,'Admin User'),
-(8,'INV-5008','2026-10-11',58800.00,'Cash ($58800.00)','completed','Walk-in Customer','[{\"method\":\"Cash\",\"amount\":58800}]',0.00,0.00,56000.00,2800.00,'Admin User'),
-(9,'INV-5009','2026-10-11',58842.00,'Cash ($58842.00)','completed','Walk-in Customer','[{\"method\":\"Cash\",\"amount\":58842}]',0.00,0.00,56040.00,2802.00,'Priya Nair'),
-(10,'INV-5010','2026-10-11',58842.00,'Check ($58842.00)','completed','Walk-in Customer','[{\"method\":\"Check\",\"amount\":58842}]',0.00,0.00,56040.00,2802.00,'Priya Nair');
 /*!40000 ALTER TABLE `sales` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -359,7 +303,7 @@ CREATE TABLE `suppliers` (
   `email` varchar(100) DEFAULT NULL,
   `address` text DEFAULT NULL,
   PRIMARY KEY (`supplier_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -369,10 +313,6 @@ CREATE TABLE `suppliers` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `suppliers` WRITE;
 /*!40000 ALTER TABLE `suppliers` DISABLE KEYS */;
-INSERT INTO `suppliers` VALUES
-(1,'TechSource Solutions','Kavya Rao','+91 98450 11223','orders@techsource.in',NULL),
-(2,'Prime Office Furnishings','Manish Sen','+91 98711 33445','sales@primefurnish.com',NULL),
-(3,'posh','','','','');
 /*!40000 ALTER TABLE `suppliers` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -394,7 +334,7 @@ CREATE TABLE `users` (
   `designation` varchar(100) DEFAULT 'Staff',
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -405,8 +345,8 @@ SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
 INSERT INTO `users` VALUES
-(1,'Admin User','admin@bizcore.dev','admin123','admin','System Administrator'),
-(2,'Priya Nair','employee@bizcore.dev','employee123','employee','Store Manager');
+(1,'Admin User','admin@bizcore.dev','admin123','admin','Store General Manager'),
+(2,'Priya Nair','employee@bizcore.dev','employee123','employee','Head Cashier');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
@@ -421,4 +361,4 @@ SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2026-10-11 13:35:36
+-- Dump completed on 2026-10-11 14:08:46
