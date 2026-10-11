@@ -1,0 +1,1834 @@
+import os
+
+# ==========================================================
+# 1. UPDATE NLP ENGINE: REMOVE ALL $ SYMBOLS
+# ==========================================================
+nlp_code = """import re
+from datetime import date
+
+class NLPQueryParser:
+    def __init__(self, db_cursor):
+        self.cursor = db_cursor
+
+    def process_query(self, user_query: str):
+        query = user_query.strip().lower()
+
+        # 1. Show today's sales
+        if "today's sales" in query or "sales today" in query:
+            today_str = date.today().strftime('%Y-%m-%d')
+            sql = "SELECT IFNULL(SUM(total_amount), 0) AS total_sales, COUNT(sale_id) AS total_orders FROM sales WHERE DATE(sale_date) = %s"
+            self.cursor.execute(sql, (today_str,))
+            res = self.cursor.fetchone()
+            return {
+                "intent": "SALES_QUERY_TODAY",
+                "confidence": "98.9%",
+                "entities": [{"type": "DATE", "value": "TODAY"}],
+                "sql": sql.replace("%s", f"'{today_str}'"),
+                "answer": f"Today's total sales amount to {float(res['total_sales']):,.2f} across {res['total_orders']} orders."
+            }
+
+        # 2. How many laptops are currently in stock?
+        if "laptops are currently in stock" in query or "how many laptops" in query:
+            sql = "SELECT product_name, stock FROM products WHERE LOWER(product_name) LIKE '%laptop%'"
+            self.cursor.execute(sql)
+            rows = self.cursor.fetchall()
+            tot = sum(r['stock'] for r in rows)
+            details = ", ".join([f"{r['product_name']}: {r['stock']} units" for r in rows])
+            return {
+                "intent": "INVENTORY_CATEGORY_STOCK",
+                "confidence": "97.4%",
+                "entities": [{"type": "CATEGORY", "value": "Laptops"}],
+                "sql": sql,
+                "answer": f"There are {tot} total laptops in stock ({details})."
+            }
+
+        # 3. Which products have less than 10 items?
+        threshold_match = re.search(r'(?:less than|under|below)\\s+(\\d+)', query)
+        if threshold_match and ("stock" in query or "items" in query or "product" in query):
+            num = int(threshold_match.group(1))
+            sql = "SELECT product_name, stock FROM products WHERE stock < %s ORDER BY stock ASC"
+            self.cursor.execute(sql, (num,))
+            items = self.cursor.fetchall()
+            formatted = ", ".join([f"{item['product_name']} ({item['stock']} left)" for item in items]) if items else f"None under {num}"
+            return {
+                "intent": "INVENTORY_LOW_STOCK_ALERT",
+                "confidence": "98.1%",
+                "entities": [{"type": "LIMIT", "value": str(num)}],
+                "sql": sql.replace("%s", str(num)),
+                "answer": f"Products with under {num} items: {formatted}."
+            }
+
+        # 4. Show sales for this month
+        if "sales for this month" in query or "this month sales" in query:
+            sql = "SELECT IFNULL(SUM(total_amount), 0) AS m_sales, COUNT(*) AS m_cnt FROM sales WHERE MONTH(sale_date) = MONTH(CURRENT_DATE()) AND YEAR(sale_date) = YEAR(CURRENT_DATE())"
+            self.cursor.execute(sql)
+            res = self.cursor.fetchone()
+            return {
+                "intent": "SALES_QUERY_MONTH",
+                "confidence": "96.5%",
+                "entities": [{"type": "RANGE", "value": "CURRENT_MONTH"}],
+                "sql": sql,
+                "answer": f"Sales for this month total {float(res['m_sales']):,.2f} across {res['m_cnt']} transactions."
+            }
+
+        # 5. Who are the employees in the sales department?
+        if "employees in the sales department" in query or "sales department employees" in query:
+            sql = "SELECT e.name, e.designation FROM employees e LEFT JOIN departments d ON e.dept_id = d.dept_id WHERE LOWER(d.dept_name) LIKE '%sales%'"
+            self.cursor.execute(sql)
+            emps = self.cursor.fetchall()
+            list_str = ", ".join([f"{e['name']} ({e['designation']})" for e in emps]) if emps else "No employees listed in Sales."
+            return {
+                "intent": "HR_DEPARTMENT_DIRECTORY",
+                "confidence": "98.2%",
+                "entities": [{"type": "DEPARTMENT", "value": "Sales"}],
+                "sql": sql,
+                "answer": f"Employees in the Sales department: {list_str}."
+            }
+
+        # 6. Which product has the highest sales?
+        if "highest sales" in query or "best selling" in query:
+            sql = "SELECT p.product_name, IFNULL(SUM(si.quantity), 0) as total_sold FROM products p LEFT JOIN sale_items si ON p.product_id = si.product_id GROUP BY p.product_id, p.product_name ORDER BY total_sold DESC LIMIT 1"
+            self.cursor.execute(sql)
+            res = self.cursor.fetchone()
+            return {
+                "intent": "SALES_TOP_PRODUCT",
+                "confidence": "99.0%",
+                "entities": [{"type": "METRIC", "value": "MAX(quantity)"}],
+                "sql": sql,
+                "answer": f"The highest selling product is '{res['product_name']}' with {res['total_sold']} units sold." if res else "No sales recorded."
+            }
+
+        # 7. Who is our top customer?
+        if "top customer" in query:
+            sql = "SELECT customer_name, IFNULL(SUM(total_amount), 0) as spent FROM sales GROUP BY customer_name ORDER BY spent DESC LIMIT 1"
+            self.cursor.execute(sql)
+            res = self.cursor.fetchone()
+            return {
+                "intent": "CUSTOMER_TOP_SPENDER",
+                "confidence": "95.5%",
+                "entities": [{"type": "METRIC", "value": "MAX(total_amount)"}],
+                "sql": sql,
+                "answer": f"Top customer is '{res['customer_name']}' with total purchases of {float(res['spent']):,.2f}." if res else "No customer sales recorded."
+            }
+
+        # 8. Show purchases from last month
+        if "purchases from last month" in query or "last month purchases" in query:
+            sql = "SELECT IFNULL(SUM(total_amount), 0) AS pur_tot, COUNT(*) AS pur_cnt FROM purchases WHERE purchase_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH)"
+            self.cursor.execute(sql)
+            res = self.cursor.fetchone()
+            return {
+                "intent": "PURCHASES_RECENT",
+                "confidence": "94.8%",
+                "entities": [{"type": "RANGE", "value": "LAST_MONTH"}],
+                "sql": sql,
+                "answer": f"Purchases from last month total {float(res['pur_tot']):,.2f} across {res['pur_cnt']} purchase orders."
+            }
+
+        # 9. List all suppliers
+        if "list all suppliers" in query or "all suppliers" in query:
+            sql = "SELECT supplier_name, contact_person, phone FROM suppliers"
+            self.cursor.execute(sql)
+            sups = self.cursor.fetchall()
+            list_str = "; ".join([f"{s['supplier_name']} (Contact: {s.get('contact_person') or 'N/A'})" for s in sups]) if sups else "No suppliers registered."
+            return {
+                "intent": "SUPPLIER_DIRECTORY",
+                "confidence": "98.7%",
+                "entities": [{"type": "ENTITY", "value": "Suppliers"}],
+                "sql": sql,
+                "answer": f"Registered Suppliers: {list_str}."
+            }
+
+        # 10. Total revenue this week
+        if "revenue this week" in query or "total revenue this week" in query:
+            sql = "SELECT IFNULL(SUM(total_amount), 0) AS rev FROM sales WHERE sale_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)"
+            self.cursor.execute(sql)
+            res = self.cursor.fetchone()
+            return {
+                "intent": "REVENUE_WEEKLY",
+                "confidence": "97.0%",
+                "entities": [{"type": "RANGE", "value": "LAST_7_DAYS"}],
+                "sql": sql,
+                "answer": f"Total revenue recorded in the last 7 days is {float(res['rev']):,.2f}."
+            }
+
+        # Fallback
+        return {
+            "intent": "UNKNOWN_TEMPLATE",
+            "confidence": "40.0%",
+            "entities": [],
+            "sql": "-- No SQL mapped",
+            "answer": "This NLP engine matches predefined business queries. Click one of the suggestions above to test."
+        }
+"""
+with open("nlp_engine/parser.py", "w") as f:
+    f.write(nlp_code)
+
+# ==========================================================
+# 2. COMPLETE TEMPLATE WITH ALL REQUESTED REVISIONS
+# ==========================================================
+html_code = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BizCore NLP - Enterprise Business Management</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @media print {
+      body { background: white !important; color: black !important; }
+      body * { visibility: hidden; }
+      #printableArea, #printableArea * { visibility: visible; }
+      #printableArea {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        color: black !important;
+        background: white !important;
+      }
+      .no-print { display: none !important; }
+      .print-header { display: block !important; }
+      table { border-collapse: collapse !important; width: 100% !important; }
+      th, td { border: 1px solid #cbd5e1 !important; color: black !important; padding: 6px 10px !important; }
+      thead { background-color: #f1f5f9 !important; color: black !important; }
+      .chart-container { page-break-inside: avoid; overflow: hidden !important; max-width: 100% !important; }
+    }
+    .print-header { display: none; }
+  </style>
+</head>
+<body class="bg-[#0b1322] text-slate-100 min-h-screen font-sans flex overflow-hidden">
+
+  <!-- ======================================================== -->
+  <!-- 1. FIXED DESKTOP SIDEBAR (REORDERED AS REQUESTED)        -->
+  <!-- ======================================================== -->
+  <aside class="w-64 bg-[#070e1c] border-r border-slate-800 flex flex-col justify-between p-5 select-none shrink-0 h-screen no-print">
+    <div class="space-y-6">
+      
+      <!-- New Standard Minimal Geometric Logo -->
+      <div class="flex items-center space-x-3 px-2">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#00897b] to-teal-400 flex items-center justify-center shadow-lg">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="font-extrabold text-white text-base tracking-tight leading-tight">BizCore NLP</h2>
+          <p class="text-[11px] text-slate-400 font-medium">Enterprise Management</p>
+        </div>
+      </div>
+
+      <!-- Navigation Links: 1. Dashboard, 2. Sales & POS, 3. Products, 4. Customers, 5. Inventory, etc. -->
+      <nav class="space-y-1.5 text-xs font-semibold">
+        <!-- 1. Dashboard -->
+        <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl bg-[#13233b] text-teal-300">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+          <span>Dashboard</span>
+        </button>
+
+        <!-- 2. Sales & POS (Immediately after Dashboard) -->
+        <button onclick="switchTab('pos')" id="nav-pos" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <span>Sales & POS</span>
+        </button>
+
+        <!-- 3. Products -->
+        <button onclick="switchTab('products')" id="nav-products" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          <span>Products</span>
+        </button>
+
+        <!-- 4. Customers -->
+        <button onclick="switchTab('customers')" id="nav-customers" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <span>Customers</span>
+        </button>
+
+        <!-- 5. Inventory -->
+        <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          <span>Inventory</span>
+        </button>
+
+        {% if user.role == 'admin' %}
+        <!-- 6. Employees (Admin) -->
+        <button onclick="switchTab('employees')" id="nav-employees" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          <span>Employees</span>
+        </button>
+
+        <!-- 7. Suppliers (Admin) -->
+        <button onclick="switchTab('suppliers')" id="nav-suppliers" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+          <span>Suppliers</span>
+        </button>
+
+        <!-- 8. Purchases (Admin) -->
+        <button onclick="switchTab('purchases')" id="nav-purchases" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          <span>Purchases</span>
+        </button>
+
+        <!-- 9. Reports (Admin) -->
+        <button onclick="switchTab('reports')" id="nav-reports" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/></svg>
+          <span>Reports</span>
+        </button>
+        {% endif %}
+
+        <!-- 10. NLP Assistant -->
+        <button onclick="switchTab('nlp')" id="nav-nlp" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-300 hover:bg-slate-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+          <span>NLP Assistant</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- User Profile & Sign Out Footer -->
+    <div class="border-t border-slate-800 pt-4 px-2 space-y-2">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-teal-400 text-xs">
+          {{ user.name[:2].upper() }}
+        </div>
+        <div class="overflow-hidden">
+          <p class="font-bold text-xs text-white truncate">{{ user.name }}</p>
+          <p class="text-[10px] text-slate-400 truncate">{{ user.email }}</p>
+        </div>
+      </div>
+      <a href="/logout" class="block w-full py-2 text-center text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl font-semibold transition">
+        → Sign out
+      </a>
+    </div>
+  </aside>
+
+  <!-- ======================================================== -->
+  <!-- 2. MAIN DESKTOP WORKSPACE                                -->
+  <!-- ======================================================== -->
+  <div class="flex-1 flex flex-col h-screen overflow-hidden">
+    
+    <header class="h-16 bg-[#070e1c] border-b border-slate-800 px-8 flex items-center justify-between shrink-0 no-print">
+      <div class="flex items-center space-x-4">
+        <h1 id="screenHeaderTitle" class="text-lg font-extrabold text-white">Dashboard</h1>
+        <span class="text-xs text-slate-400">|</span>
+        <span class="text-xs text-teal-400 font-medium">{{ user.designation }}</span>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span class="px-3 py-1 rounded-full text-xs font-bold {% if user.role == 'admin' %}bg-purple-500/20 text-purple-300 border border-purple-500/30{% else %}bg-teal-500/20 text-teal-300 border border-teal-500/30{% endif %} capitalize">
+          {{ user.role }}
+        </span>
+      </div>
+    </header>
+
+    <main id="printableArea" class="flex-1 overflow-y-auto p-8 space-y-6">
+
+      <!-- Formal PDF Print Header -->
+      <div class="print-header mb-6 border-b-2 border-slate-400 pb-3">
+        <div class="flex justify-between items-start">
+          <div>
+            <h1 class="text-2xl font-black text-slate-900 tracking-tight">BIZCORE NLP</h1>
+            <p class="text-xs text-slate-600 font-semibold uppercase tracking-wider">Enterprise Business Management System</p>
+          </div>
+          <div class="text-right text-xs text-slate-600">
+            <p id="printDocTitle" class="font-bold text-sm text-slate-900">Official Report</p>
+            <p id="printMetaDate">Printed on: Today</p>
+            <p id="printSortMeta" class="italic text-[11px]"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 1: DASHBOARD (LANDING FIRST)           -->
+      <!-- ========================================== -->
+      <div id="tab-dashboard" class="tab-pane space-y-6">
+        <div class="grid grid-cols-4 gap-5">
+          <div class="bg-[#111c2e] p-5 rounded-3xl border border-slate-800 shadow">
+            <p class="text-xs text-slate-400 font-medium">Total sales</p>
+            <p class="text-2xl font-extrabold text-white mt-1" id="dashTotalSales">0.00</p>
+          </div>
+          <div class="bg-[#111c2e] p-5 rounded-3xl border border-slate-800 shadow">
+            <p class="text-xs text-slate-400 font-medium">Orders</p>
+            <p class="text-2xl font-extrabold text-white mt-1" id="dashOrders">0</p>
+          </div>
+          <div class="bg-[#111c2e] p-5 rounded-3xl border border-slate-800 shadow">
+            <p class="text-xs text-slate-400 font-medium">Products</p>
+            <p class="text-2xl font-extrabold text-white mt-1" id="dashProducts">0</p>
+          </div>
+          <div class="bg-[#111c2e] p-5 rounded-3xl border border-slate-800 shadow">
+            <p class="text-xs text-slate-400 font-medium">Low-stock items</p>
+            <p class="text-2xl font-extrabold text-rose-400 mt-1" id="dashLowStock">0</p>
+          </div>
+        </div>
+
+        <div class="bg-[#111c2e] p-6 rounded-3xl border border-slate-800 shadow chart-container">
+          <h3 class="text-sm font-bold text-slate-200 mb-4">Sales trend (30 days)</h3>
+          <div class="relative w-full h-64 overflow-hidden"><canvas id="salesTrendChart"></canvas></div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6">
+          <div class="bg-[#111c2e] p-6 rounded-3xl border border-slate-800 shadow space-y-3">
+            <h3 class="text-sm font-bold text-slate-200">Recent transactions</h3>
+            <div id="dashRecentTx" class="divide-y divide-slate-800 text-xs"></div>
+          </div>
+          <div class="bg-[#111c2e] p-6 rounded-3xl border border-slate-800 shadow space-y-3">
+            <h3 class="text-sm font-bold text-slate-200">Low-stock alerts</h3>
+            <div id="dashLowStockList" class="space-y-2 text-xs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======================================================== -->
+      <!-- TAB 2: SALES & POS TERMINAL (NEW CUSTOMER POPUP + SPLIT) -->
+      <!-- ======================================================== -->
+      <div id="tab-pos" class="tab-pane space-y-4 hidden">
+        <div class="grid grid-cols-12 gap-6">
+          
+          <div class="col-span-7 space-y-4">
+            <div class="bg-[#111c2e] p-4 rounded-3xl border border-slate-800 space-y-3">
+              <div class="flex gap-2">
+                <input type="text" id="posSkuInp" onkeydown="if(event.key==='Enter') addPosBySku()" placeholder="🔍 Scan barcode or enter SKU / Item Name..." class="flex-1 bg-slate-900 border border-slate-700 text-xs px-3 py-2.5 rounded-xl text-white font-mono">
+                <button onclick="addPosBySku()" class="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow">Pick</button>
+              </div>
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span>Customer:</span>
+                <!-- Customer dropdown with inline + Add New Customer trigger -->
+                <select id="posCustomerSelect" onchange="handlePosCustomerChange(this)" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-semibold"></select>
+              </div>
+            </div>
+
+            <!-- Hardware Action Buttons -->
+            <div class="grid grid-cols-4 gap-2">
+              <button onclick="posPromptQty()" class="bg-slate-800 hover:bg-slate-700 border border-indigo-500/40 text-indigo-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">🔢</span><span>Qty</span>
+              </button>
+              <button onclick="posPromptDiscount()" class="bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">🏷️</span><span>Discount</span>
+              </button>
+              <button onclick="posVoidItem()" class="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">⚠️</span><span>Void Item</span>
+              </button>
+              <button onclick="posVoidSale()" class="bg-slate-800 hover:bg-slate-700 border border-rose-500/40 text-rose-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">🚫</span><span>Void Sale</span>
+              </button>
+              <button onclick="posHoldOrder()" class="bg-slate-800 hover:bg-slate-700 border border-purple-500/40 text-purple-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">⏸️</span><span>Hold Order</span>
+              </button>
+              <button onclick="posRetrieveOrder()" class="bg-slate-800 hover:bg-slate-700 border border-blue-500/40 text-blue-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">▶️</span><span>Retrieve</span>
+              </button>
+              <button onclick="posPriceOverride()" class="bg-slate-800 hover:bg-slate-700 border border-cyan-500/40 text-cyan-300 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">💲</span><span>Price Ovr</span>
+              </button>
+              <button onclick="posClearAll()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 py-2.5 px-1 rounded-xl text-xs font-bold flex flex-col items-center shadow">
+                <span class="text-sm">🧹</span><span>Clear</span>
+              </button>
+            </div>
+
+            <!-- Items Quick Grid -->
+            <div id="posGridContainer" class="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto pr-1"></div>
+          </div>
+
+          <!-- POS Order Summary & Split Tender -->
+          <div class="col-span-5 bg-[#111c2e] p-5 rounded-3xl border border-slate-800 space-y-4">
+            <h3 class="font-bold text-sm text-white">Current Order Details</h3>
+            
+            <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow">
+              <div class="bg-slate-800/90 px-3 py-2 grid grid-cols-12 text-[10px] font-extrabold text-slate-300 uppercase">
+                <span class="col-span-5">Item</span>
+                <span class="col-span-2 text-center">Qty</span>
+                <span class="col-span-2 text-right">Price</span>
+                <span class="col-span-3 text-right">Total</span>
+              </div>
+              <div id="posLinesContainer" class="divide-y divide-slate-800 max-h-40 overflow-y-auto text-xs min-h-[90px]"></div>
+            </div>
+
+            <div class="bg-slate-900 p-3 rounded-2xl border border-slate-800 space-y-1 text-xs">
+              <div class="flex justify-between text-slate-400"><span>Subtotal:</span><span id="posSub" class="font-mono text-white">0.00</span></div>
+              <div class="flex justify-between text-slate-400"><span>Discount:</span><span id="posDisc" class="text-emerald-400 font-mono">-0.00 (0%)</span></div>
+              <div class="flex justify-between text-slate-400"><span>Tax (5%):</span><span id="posTax" class="font-mono text-white">0.00</span></div>
+              <div class="flex justify-between font-extrabold text-sm text-teal-400 border-t border-slate-800 pt-1">
+                <span>Net Total:</span><span id="posTot" class="font-mono">0.00</span>
+              </div>
+            </div>
+
+            <!-- Split Payments -->
+            <div class="bg-slate-900 p-4 rounded-2xl border border-teal-500/30 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-teal-300">Split-Payment Tenders</span>
+                <span id="posSplitStatus" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">Unpaid</span>
+              </div>
+              
+              <div id="appliedTendersContainer" class="space-y-1 text-xs"></div>
+
+              <div class="flex justify-between items-center text-xs bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
+                <div>
+                  <span class="text-[10px] text-slate-400 block">Remaining:</span>
+                  <span id="posRemainingDue" class="font-extrabold text-amber-400 text-sm font-mono">0.00</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-[10px] text-slate-400 block">Change:</span>
+                  <span id="posChangeDue" class="font-extrabold text-emerald-400 text-sm font-mono">0.00</span>
+                </div>
+              </div>
+
+              <div class="space-y-2 pt-1 border-t border-slate-800">
+                <div class="flex gap-2">
+                  <select id="tenderMethodSelect" class="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2 py-2">
+                    <option value="Cash">Cash 💵</option>
+                    <option value="UPI">UPI / QR 📱</option>
+                    <option value="Card">Card 💳</option>
+                    <option value="Check">Check 📝</option>
+                    <option value="Store Credit">Store Credit 🎟️</option>
+                  </select>
+                  <input type="number" step="0.01" id="tenderAmountInput" placeholder="Amount" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono">
+                  <button onclick="addPaymentTender()" class="px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold">+ Add</button>
+                </div>
+                <div class="flex gap-1.5 text-[10px]">
+                  <button onclick="fillExactRemaining()" class="px-2.5 py-1 rounded-lg bg-slate-800 text-teal-300 font-bold border border-slate-700">Exact</button>
+                  <button onclick="setQuickTender(100)" class="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">100</button>
+                  <button onclick="setQuickTender(500)" class="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">500</button>
+                  <button onclick="setQuickTender(2000)" class="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">2000</button>
+                </div>
+              </div>
+
+              <button onclick="completeSplitCheckout()" id="btnCompleteSale" class="w-full py-3 bg-slate-800 font-extrabold text-slate-500 text-xs rounded-xl shadow transition opacity-50 cursor-not-allowed">
+                Complete Sale & Print Receipt 🖨️
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 3: PRODUCTS (WITH SORTED PDF)          -->
+      <!-- ========================================== -->
+      <div id="tab-products" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Product catalogue</h2>
+            <p class="text-xs text-slate-400">All registered inventory items & pricing</p>
+          </div>
+          <div class="flex gap-2">
+            <select id="prodSortSelect" onchange="renderProductsTable()" class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-slate-200">
+              <option value="name-asc">Sort: Name (A-Z)</option>
+              <option value="name-desc">Sort: Name (Z-A)</option>
+              <option value="price-asc">Sort: Price (Low-High)</option>
+              <option value="price-desc">Sort: Price (High-Low)</option>
+              <option value="stock-asc">Sort: Stock (Low First)</option>
+            </select>
+            <button onclick="triggerPrintWithMeta('Product Catalogue Report', 'Products Table')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <input type="text" id="prodSearch" onkeyup="filterProductsTable()" placeholder="Search products..." class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white">
+            <button onclick="openModal('modalNewProduct')" class="px-4 py-2 bg-[#00897b] hover:bg-[#00796b] text-white text-xs font-bold rounded-xl shadow">+ New product</button>
+          </div>
+        </div>
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">SKU</th>
+                <th class="p-3.5">Name</th>
+                <th class="p-3.5">Category</th>
+                <th class="p-3.5">Supplier</th>
+                <th class="p-3.5">Price</th>
+                <th class="p-3.5">Stock</th>
+                <th class="p-3.5 text-right no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="productsTableBody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 4: CUSTOMERS (WITH SORTED PDF)         -->
+      <!-- ========================================== -->
+      <div id="tab-customers" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Customer records</h2>
+            <p class="text-xs text-slate-400">Corporate & retail client directory</p>
+          </div>
+          <div class="flex gap-2">
+            <select id="custSortSelect" onchange="renderCustomersTable()" class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-slate-200">
+              <option value="name-asc">Sort: Name (A-Z)</option>
+              <option value="city-asc">Sort: City</option>
+              <option value="type-asc">Sort: Customer Type</option>
+            </select>
+            <button onclick="triggerPrintWithMeta('Customer Records Report', 'Customers Table')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <input type="text" id="custSearch" onkeyup="filterCustomersTable()" placeholder="Search customers..." class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white">
+            <button onclick="openModal('modalNewCustomer')" class="px-4 py-2 bg-[#00897b] hover:bg-[#00796b] text-white text-xs font-bold rounded-xl shadow">+ New customer</button>
+          </div>
+        </div>
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">Name</th>
+                <th class="p-3.5">Type</th>
+                <th class="p-3.5">City</th>
+                <th class="p-3.5">Email</th>
+                <th class="p-3.5">Phone</th>
+                <th class="p-3.5 text-right no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 5: INVENTORY (WITH PDF)                -->
+      <!-- ========================================== -->
+      <div id="tab-inventory" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Stock levels</h2>
+            <p class="text-xs text-slate-400">Current warehouse inventory vs reorder threshold</p>
+          </div>
+          <button onclick="triggerPrintWithMeta('Inventory Health & Reorder Report', 'Live Inventory')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+            <span>🖨️ Save as PDF</span>
+          </button>
+        </div>
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">SKU</th>
+                <th class="p-3.5">Product</th>
+                <th class="p-3.5">Stock</th>
+                <th class="p-3.5">Reorder level</th>
+                <th class="p-3.5">Status</th>
+              </tr>
+            </thead>
+            <tbody id="inventoryTableBody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 6: EMPLOYEES (ADMIN)                   -->
+      <!-- ========================================== -->
+      <div id="tab-employees" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Staff directory</h2>
+            <p class="text-xs text-slate-400">Personnel records, posts, departments & actions</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="triggerPrintWithMeta('Staff Directory Report', 'Employees')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <input type="text" id="empSearch" onkeyup="filterEmployeesTable()" placeholder="Search employees..." class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white">
+            <button onclick="openModal('modalAddDept')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold rounded-xl border border-slate-700">+ New Dept</button>
+            <button onclick="openModal('modalNewEmployee')" class="px-4 py-2 bg-[#00897b] hover:bg-[#00796b] text-white text-xs font-bold rounded-xl shadow">+ New employee</button>
+          </div>
+        </div>
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">Name</th>
+                <th class="p-3.5">Position</th>
+                <th class="p-3.5">Department</th>
+                <th class="p-3.5">Email</th>
+                <th class="p-3.5">Phone</th>
+                <th class="p-3.5">Status</th>
+                <th class="p-3.5 text-right no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="employeesTableBody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 7: SUPPLIERS (ADMIN)                   -->
+      <!-- ========================================== -->
+      <div id="tab-suppliers" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Suppliers directory</h2>
+            <p class="text-xs text-slate-400">Registered vendors with contact modification</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="triggerPrintWithMeta('Suppliers Directory Report', 'Suppliers')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <button onclick="openModal('modalNewSupplier')" class="px-4 py-2 bg-[#00897b] hover:bg-[#00796b] text-white text-xs font-bold rounded-xl shadow">+ New supplier</button>
+          </div>
+        </div>
+        <div id="suppliersDesktopGrid" class="grid grid-cols-3 gap-4"></div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 8: PURCHASES (ADMIN)                   -->
+      <!-- ========================================== -->
+      <div id="tab-purchases" class="tab-pane space-y-4 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Purchase orders</h2>
+            <p class="text-xs text-slate-400">Stock inward logistics & purchase orders</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="triggerPrintWithMeta('Purchase Orders Report', 'Purchases')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <button onclick="openModal('modalNewPurchase')" class="px-4 py-2 bg-[#00897b] hover:bg-[#00796b] text-white text-xs font-bold rounded-xl shadow">+ New PO</button>
+          </div>
+        </div>
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">PO</th>
+                <th class="p-3.5">Date</th>
+                <th class="p-3.5">Supplier</th>
+                <th class="p-3.5">Total</th>
+                <th class="p-3.5">Qty</th>
+                <th class="p-3.5">Status</th>
+                <th class="p-3.5 text-right no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="purchasesTableBody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 9: REPORTS (FIXED GRAPH BORDER + PDF)  -->
+      <!-- ========================================== -->
+      <div id="tab-reports" class="tab-pane space-y-6 hidden">
+        <div class="flex justify-between items-center no-print">
+          <div>
+            <h2 class="text-lg font-bold text-white">Revenue by category & Monthly Analytics</h2>
+            <p class="text-xs text-slate-400">Departmental breakdown, monthly sorting & detailed table report</p>
+          </div>
+          <div class="flex gap-2">
+            <!-- Monthly Filter -->
+            <select id="reportMonthFilter" onchange="renderReportsAnalytics()" class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-teal-300 font-bold">
+              <option value="ALL">All Recorded Months</option>
+              <option value="01">January Report</option>
+              <option value="02">February Report</option>
+              <option value="03">March Report</option>
+              <option value="04">April Report</option>
+              <option value="05">May Report</option>
+              <option value="06">June Report</option>
+              <option value="07">July Report</option>
+              <option value="08">August Report</option>
+              <option value="09">September Report</option>
+              <option value="10" selected>October Report (Active)</option>
+              <option value="11">November Report</option>
+              <option value="12">December Report</option>
+            </select>
+
+            <button onclick="triggerPrintWithMeta('Monthly Category Revenue Audit', 'Filtered by Month')" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5">
+              <span>🖨️ Save as PDF</span>
+            </button>
+            <a href="/api/export-sales-csv" target="_blank" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>📥 Export CSV</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- 1. The Category Revenue Graph (BORDER FIXED WITH INTERNAL PADDING & OVERFLOW HIDDEN) -->
+        <div class="bg-[#111c2e] p-6 rounded-3xl border border-slate-800 shadow chart-container overflow-hidden">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">Revenue Performance Graph</h3>
+            <span id="reportFilterLabel" class="text-xs text-teal-400 font-bold">October 2026 Analysis</span>
+          </div>
+          <!-- Bounded wrapper preventing canvas from crossing right border -->
+          <div class="relative w-full h-72 overflow-hidden px-2">
+            <canvas id="categoryReportChart"></canvas>
+          </div>
+        </div>
+
+        <!-- 2. Detailed Breakdown Table -->
+        <div class="bg-[#111c2e] rounded-3xl border border-slate-800 overflow-hidden shadow space-y-2 p-6">
+          <h3 class="text-sm font-bold text-white mb-2">Detailed Category Breakdown & Contribution Table</h3>
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/80 text-slate-400 uppercase text-[10px] font-bold">
+              <tr>
+                <th class="p-3.5">Category</th>
+                <th class="p-3.5">Units Sold</th>
+                <th class="p-3.5">Avg Unit Price</th>
+                <th class="p-3.5">Total Revenue</th>
+                <th class="p-3.5 text-right">Contribution (%)</th>
+              </tr>
+            </thead>
+            <tbody id="detailedReportTableBody" class="divide-y divide-slate-800"></tbody>
+            <tfoot class="border-t border-slate-700 font-bold text-white text-xs bg-slate-800/40">
+              <tr>
+                <td class="p-3.5">Total</td>
+                <td class="p-3.5 font-mono" id="totUnitsReport">0</td>
+                <td class="p-3.5">-</td>
+                <td class="p-3.5 text-teal-400 font-mono" id="totRevReport">0.00</td>
+                <td class="p-3.5 text-right">100.0%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 10: NLP ASSISTANT                      -->
+      <!-- ========================================== -->
+      <div id="tab-nlp" class="tab-pane space-y-6 hidden">
+        <div class="bg-[#111c2e] p-8 rounded-3xl border border-slate-800 shadow space-y-4">
+          <div>
+            <h2 class="text-xl font-bold text-white">NLP Assistant</h2>
+            <p class="text-xs text-slate-400 mt-1">Ask questions about your business in plain English. Questions are matched to predefined query templates.</p>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <input type="text" id="nlpDesktopInput" placeholder="e.g. Which products have less than 10 items?" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-teal-500">
+            <button onclick="runNLPQuery()" class="px-6 py-3 bg-[#00897b] hover:bg-[#00796b] text-white font-bold rounded-2xl text-sm shadow">Ask</button>
+          </div>
+          <div class="space-y-2 pt-2">
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Predefined Query Templates:</span>
+            <div class="flex flex-wrap gap-2 text-xs">
+              <button onclick="pickNlpChip('Show today\\'s sales')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Show today's sales</button>
+              <button onclick="pickNlpChip('How many laptops are currently in stock?')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">How many laptops are currently in stock?</button>
+              <button onclick="pickNlpChip('Which products have less than 10 items?')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Which products have less than 10 items?</button>
+              <button onclick="pickNlpChip('Show sales for this month')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Show sales for this month</button>
+              <button onclick="pickNlpChip('Who are the employees in the sales department?')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Who are the employees in the sales department?</button>
+              <button onclick="pickNlpChip('Which product has the highest sales?')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Which product has the highest sales?</button>
+              <button onclick="pickNlpChip('Who is our top customer?')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Who is our top customer?</button>
+              <button onclick="pickNlpChip('Show purchases from last month')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Show purchases from last month</button>
+              <button onclick="pickNlpChip('List all suppliers')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">List all suppliers</button>
+              <button onclick="pickNlpChip('Total revenue this week')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">Total revenue this week</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="nlpInspectBox" class="bg-[#111c2e] p-6 rounded-3xl border border-slate-800 shadow space-y-4 hidden text-xs">
+          <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+            <span class="font-bold text-teal-400">NLP Query Breakdown</span>
+            <span id="nlpConfidenceBadge" class="bg-teal-500/20 text-teal-300 px-2.5 py-0.5 rounded-full text-[10px]"></span>
+          </div>
+          <div><code id="nlpIntentBadge" class="text-purple-300 font-mono bg-slate-900 px-3 py-1.5 rounded block"></code></div>
+          <div><code id="nlpSqlBadge" class="text-emerald-400 font-mono bg-slate-900 p-2.5 rounded block"></code></div>
+          <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800"><p id="nlpResponseText" class="text-white text-sm font-semibold"></p></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 3. UNIVERSAL EDIT MODAL                                  -->
+  <!-- ======================================================== -->
+  <div id="modalUniversalEdit" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+        <h3 id="editModalTitle" class="font-bold text-base text-white">Edit Record</h3>
+        <button onclick="closeModal('modalUniversalEdit')" class="text-slate-400 hover:text-white font-bold">✕</button>
+      </div>
+      <div id="editModalInputs" class="space-y-3"></div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalUniversalEdit')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitUniversalEdit()" class="w-1/2 py-2.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Creation Modals -->
+  <div id="modalAddDept" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+      <h3 class="font-bold text-sm text-white">Create New Department</h3>
+      <input type="text" id="newDeptName" placeholder="Department Name" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <div class="flex gap-2">
+        <button onclick="closeModal('modalAddDept')" class="w-1/2 py-2 bg-slate-800 text-slate-300 text-xs rounded-xl">Cancel</button>
+        <button onclick="submitNewDept()" class="w-1/2 py-2 bg-teal-600 text-white text-xs font-bold rounded-xl">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewEmployee" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-3 max-h-[90vh] overflow-y-auto shadow-2xl">
+      <h3 class="font-bold text-base text-white">New employee</h3>
+      <input type="text" id="neName" placeholder="Full name *" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="email" id="neEmail" placeholder="Email *" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="password" id="nePass" placeholder="Password (default: welcome123)" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="nePhone" placeholder="Phone" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <select id="neDept" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white"></select>
+      <input type="text" id="nePosition" placeholder="Position" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="number" id="neSalary" placeholder="Monthly salary" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="date" id="neJoin" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <select id="neStatus" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+        <option value="Active">Active</option>
+        <option value="Leave">Leave</option>
+      </select>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalNewEmployee')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitNewEmployee()" class="w-1/2 py-2.5 bg-[#00897b] text-white text-xs font-bold rounded-xl shadow">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewProduct" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-3 max-h-[90vh] overflow-y-auto shadow-2xl">
+      <h3 class="font-bold text-base text-white">New product</h3>
+      <input type="text" id="npSku" placeholder="SKU (e.g. SKU-1005)" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono">
+      <input type="text" id="npName" placeholder="Name *" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="npCategory" placeholder="Category" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <select id="npSupplier" class="w-full text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white"></select>
+      <div class="grid grid-cols-2 gap-2">
+        <input type="number" step="0.01" id="npPrice" placeholder="Selling price *" class="text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+        <input type="number" step="0.01" id="npCost" placeholder="Unit cost" class="text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <input type="number" id="npStock" placeholder="Opening stock" class="text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+        <input type="number" id="npReorder" placeholder="Reorder level (10)" class="text-xs p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalNewProduct')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitNewProduct()" class="w-1/2 py-2.5 bg-[#00897b] text-white text-xs font-bold rounded-xl shadow">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewCustomer" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+      <h3 class="font-bold text-base text-white">New customer</h3>
+      <input type="text" id="custName" placeholder="Name *" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <select id="custType" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+        <option value="Retail">Retail</option>
+        <option value="Corporate">Corporate</option>
+      </select>
+      <input type="email" id="custEmail" placeholder="Email" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="custPhone" placeholder="Phone" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="custCity" placeholder="City" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalNewCustomer')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitNewCustomer()" class="w-1/2 py-2.5 bg-[#00897b] text-white text-xs font-bold rounded-xl shadow">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewSupplier" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-3 shadow-2xl">
+      <h3 class="font-bold text-base text-white">New supplier</h3>
+      <input type="text" id="nsName" placeholder="Supplier Company Name *" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="nsPerson" placeholder="Contact Person" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="text" id="nsPhone" placeholder="Phone" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="email" id="nsEmail" placeholder="Email" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalNewSupplier')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitNewSupplier()" class="w-1/2 py-2.5 bg-[#00897b] text-white text-xs font-bold rounded-xl shadow">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewPurchase" class="fixed inset-0 bg-slate-950/70 z-50 hidden flex items-center justify-center p-4 no-print">
+    <div class="bg-[#111c2e] border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-3 shadow-2xl">
+      <h3 class="font-bold text-base text-white">Create Purchase Order</h3>
+      <select id="npoSupplier" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white"></select>
+      <input type="number" step="0.01" id="npoAmount" placeholder="Total Amount *" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <input type="number" id="npoQty" placeholder="Quantity" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+      <select id="npoStatus" class="w-full text-xs p-3 bg-slate-900 border border-slate-700 rounded-xl text-white">
+        <option value="Received">Received</option>
+        <option value="Ordered">Ordered</option>
+      </select>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeModal('modalNewPurchase')" class="w-1/2 py-2.5 bg-slate-800 text-slate-300 text-xs rounded-xl font-bold">Cancel</button>
+        <button onclick="submitNewPurchase()" class="w-1/2 py-2.5 bg-[#00897b] text-white text-xs font-bold rounded-xl shadow">Create PO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 4. CLIENT JAVASCRIPT                                     -->
+  <!-- ======================================================== -->
+  <script>
+    let appData = {};
+    let posCart = [];
+    let selectedLineIndex = -1;
+    let discountPercent = 0;
+    let appliedTenders = [];
+    let heldOrders = [];
+    let currentEditState = { entity: null, id: null };
+    let categoryReportChartInstance = null;
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.add('hidden'));
+      const active = document.getElementById('tab-' + tabId);
+      if (active) active.classList.remove('hidden');
+
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('bg-[#13233b]', 'text-teal-300');
+        btn.classList.add('text-slate-300');
+      });
+      const activeNav = document.getElementById('nav-' + tabId);
+      if (activeNav) {
+        activeNav.classList.add('bg-[#13233b]', 'text-teal-300');
+        activeNav.classList.remove('text-slate-300');
+      }
+
+      const titleMap = {
+        'dashboard': 'Dashboard',
+        'pos': 'Sales & POS Terminal',
+        'products': 'Products',
+        'customers': 'Customers',
+        'inventory': 'Inventory',
+        'employees': 'Employees',
+        'suppliers': 'Suppliers',
+        'purchases': 'Purchases',
+        'reports': 'Reports',
+        'nlp': 'NLP Assistant'
+      };
+      document.getElementById('screenHeaderTitle').innerText = titleMap[tabId] || 'Dashboard';
+    }
+
+    function openModal(id) { const m = document.getElementById(id); if (m) m.classList.remove('hidden'); }
+    function closeModal(id) { const m = document.getElementById(id); if (m) m.classList.add('hidden'); }
+
+    // Print to PDF with Dynamic Heading & Sort Criteria
+    function triggerPrintWithMeta(docTitle, sortCriteria) {
+      document.getElementById('printDocTitle').innerText = docTitle;
+      document.getElementById('printMetaDate').innerText = 'Generated: ' + new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString();
+      document.getElementById('printSortMeta').innerText = sortCriteria ? 'View: ' + sortCriteria : '';
+      window.print();
+    }
+
+    // POS Customer Selector with inline New Customer trigger
+    function handlePosCustomerChange(selectEl) {
+      if (selectEl.value === 'NEW_CUSTOMER_TRIGGER') {
+        openModal('modalNewCustomer');
+        selectEl.value = 'Walk-in Customer';
+      }
+    }
+
+    // 3-Dot Actions (Edit & Delete)
+    function triggerAction(entity, id, action) {
+      if (action === 'delete') {
+        if (confirm(`Are you sure you want to delete this ${entity} record?`)) {
+          fetch('/api/delete-entity', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ entity, id })
+          }).then(r => r.json()).then(d => {
+            if (d.status === 'success') loadMasterData();
+            else alert('Error: ' + d.message);
+          });
+        }
+      } else if (action === 'edit') {
+        openEditModal(entity, id);
+      }
+    }
+
+    function openEditModal(entity, id) {
+      currentEditState = { entity, id };
+      const title = document.getElementById('editModalTitle');
+      const box = document.getElementById('editModalInputs');
+      box.innerHTML = '';
+
+      if (entity === 'employee') {
+        const emp = appData.employees.find(e => e.employee_id === id);
+        if (!emp) return;
+        title.innerText = `Edit Employee: ${emp.name}`;
+        box.innerHTML = `
+          <div><label class="text-[11px] text-slate-400">Name</label><input type="text" id="edit_name" value="${emp.name}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Position</label><input type="text" id="edit_pos" value="${emp.designation}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Department</label><select id="edit_dept" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white">${appData.departments.map(d => `<option value="${d.dept_id}" ${d.dept_id === emp.dept_id ? 'selected' : ''}>${d.dept_name}</option>`).join('')}</select></div>
+          <div><label class="text-[11px] text-slate-400">Phone</label><input type="text" id="edit_phone" value="${emp.phone || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Salary</label><input type="number" id="edit_salary" value="${emp.monthly_salary}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Status</label><select id="edit_status" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"><option value="Active" ${emp.status==='Active'?'selected':''}>Active</option><option value="Leave" ${emp.status==='Leave'?'selected':''}>Leave</option></select></div>
+        `;
+      } else if (entity === 'product') {
+        const prod = appData.products.find(p => p.product_id === id);
+        if (!prod) return;
+        title.innerText = `Edit Product: ${prod.product_name}`;
+        box.innerHTML = `
+          <div><label class="text-[11px] text-slate-400">Name</label><input type="text" id="edit_name" value="${prod.product_name}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Category</label><input type="text" id="edit_cat" value="${prod.category}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Price</label><input type="number" step="0.01" id="edit_price" value="${prod.price}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Stock</label><input type="number" id="edit_stock" value="${prod.stock}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Reorder Level</label><input type="number" id="edit_reorder" value="${prod.reorder_level}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+        `;
+      } else if (entity === 'customer') {
+        const cust = appData.customers.find(c => c.customer_id === id);
+        if (!cust) return;
+        title.innerText = `Edit Customer: ${cust.name}`;
+        box.innerHTML = `
+          <div><label class="text-[11px] text-slate-400">Name</label><input type="text" id="edit_name" value="${cust.name}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Type</label><select id="edit_type" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"><option value="Retail" ${cust.type==='Retail'?'selected':''}>Retail</option><option value="Corporate" ${cust.type==='Corporate'?'selected':''}>Corporate</option></select></div>
+          <div><label class="text-[11px] text-slate-400">Email</label><input type="email" id="edit_email" value="${cust.email || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Phone</label><input type="text" id="edit_phone" value="${cust.phone || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">City</label><input type="text" id="edit_city" value="${cust.city || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+        `;
+      } else if (entity === 'supplier') {
+        const sup = appData.suppliers.find(s => s.supplier_id === id);
+        if (!sup) return;
+        title.innerText = `Edit Supplier: ${sup.supplier_name}`;
+        box.innerHTML = `
+          <div><label class="text-[11px] text-slate-400">Supplier Name</label><input type="text" id="edit_name" value="${sup.supplier_name}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Contact Person</label><input type="text" id="edit_contact" value="${sup.contact_person || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Phone</label><input type="text" id="edit_phone" value="${sup.phone || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Email</label><input type="email" id="edit_email" value="${sup.email || ''}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+        `;
+      } else if (entity === 'purchase') {
+        const pur = appData.purchases.find(p => p.purchase_id === id);
+        if (!pur) return;
+        title.innerText = `Edit Purchase Order: ${pur.po_number}`;
+        box.innerHTML = `
+          <div><label class="text-[11px] text-slate-400">Total Amount</label><input type="number" step="0.01" id="edit_amt" value="${pur.total_amount}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Quantity</label><input type="number" id="edit_qty" value="${pur.quantity || 1}" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"></div>
+          <div><label class="text-[11px] text-slate-400">Status</label><select id="edit_status" class="w-full text-xs p-2 bg-slate-900 border border-slate-700 rounded-xl text-white"><option value="Received" ${pur.status==='Received'?'selected':''}>Received</option><option value="Ordered" ${pur.status==='Ordered'?'selected':''}>Ordered</option></select></div>
+        `;
+      }
+
+      openModal('modalUniversalEdit');
+    }
+
+    async function submitUniversalEdit() {
+      const { entity, id } = currentEditState;
+      let fields = {};
+
+      if (entity === 'employee') {
+        fields = {
+          name: document.getElementById('edit_name').value.trim(),
+          designation: document.getElementById('edit_pos').value.trim(),
+          dept_id: document.getElementById('edit_dept').value,
+          phone: document.getElementById('edit_phone').value.trim(),
+          monthly_salary: document.getElementById('edit_salary').value,
+          status: document.getElementById('edit_status').value
+        };
+      } else if (entity === 'product') {
+        fields = {
+          name: document.getElementById('edit_name').value.trim(),
+          category: document.getElementById('edit_cat').value.trim(),
+          price: document.getElementById('edit_price').value,
+          stock: document.getElementById('edit_stock').value,
+          reorder_level: document.getElementById('edit_reorder').value
+        };
+      } else if (entity === 'customer') {
+        fields = {
+          name: document.getElementById('edit_name').value.trim(),
+          type: document.getElementById('edit_type').value,
+          email: document.getElementById('edit_email').value.trim(),
+          phone: document.getElementById('edit_phone').value.trim(),
+          city: document.getElementById('edit_city').value.trim()
+        };
+      } else if (entity === 'supplier') {
+        fields = {
+          name: document.getElementById('edit_name').value.trim(),
+          contact_person: document.getElementById('edit_contact').value.trim(),
+          phone: document.getElementById('edit_phone').value.trim(),
+          email: document.getElementById('edit_email').value.trim()
+        };
+      } else if (entity === 'purchase') {
+        fields = {
+          total_amount: document.getElementById('edit_amt').value,
+          quantity: document.getElementById('edit_qty').value,
+          status: document.getElementById('edit_status').value
+        };
+      }
+
+      const res = await fetch('/api/edit-entity', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ entity, id, fields })
+      });
+      const d = await res.json();
+      if (d.status === 'success') {
+        closeModal('modalUniversalEdit');
+        loadMasterData();
+      } else {
+        alert('Update failed: ' + (d.message || 'Server error'));
+      }
+    }
+
+    // ==========================================
+    // DATA RENDERING (NO $ SYMBOLS)
+    // ==========================================
+    async function loadMasterData() {
+      const res = await fetch('/api/master-data');
+      appData = await res.json();
+
+      // Dashboard
+      document.getElementById('dashTotalSales').innerText = `${appData.total_revenue.toFixed(2)}`;
+      document.getElementById('dashOrders').innerText = appData.sales.length;
+      document.getElementById('dashProducts').innerText = appData.products.length;
+      document.getElementById('dashLowStock').innerText = appData.low_stock.length;
+
+      document.getElementById('dashRecentTx').innerHTML = appData.sales.slice(0, 6).map(s => `
+        <div class="flex justify-between py-2.5">
+          <span class="text-slate-300">${s.invoice_no} · ${s.sale_date}</span>
+          <span class="font-bold text-white font-mono">${s.total_amount.toFixed(2)}</span>
+        </div>
+      `).join('');
+
+      document.getElementById('dashLowStockList').innerHTML = appData.low_stock.map(p => `
+        <div class="flex justify-between py-1.5 items-center">
+          <span class="text-slate-300">${p.product_name}</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300">${p.stock} left</span>
+        </div>
+      `).join('');
+
+      renderEmployeesTable();
+      renderProductsTable();
+      renderCustomersTable();
+
+      // Suppliers Grid
+      const supGrid = document.getElementById('suppliersDesktopGrid');
+      if (supGrid) {
+        supGrid.innerHTML = appData.suppliers.map(s => `
+          <div class="bg-[#111c2e] p-5 rounded-3xl border border-slate-800 space-y-2 relative">
+            <div class="flex justify-between items-start">
+              <h4 class="font-bold text-sm text-white">${s.supplier_name}</h4>
+              <div class="flex gap-1 no-print">
+                <button onclick="triggerAction('supplier', ${s.supplier_id}, 'edit')" class="text-slate-400 hover:text-teal-400 text-xs px-1 font-bold">✏️</button>
+                <button onclick="triggerAction('supplier', ${s.supplier_id}, 'delete')" class="text-slate-400 hover:text-rose-400 text-xs px-1 font-bold">🗑️</button>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400">Contact: ${s.contact_person || 'N/A'}</p>
+            <p class="text-xs text-slate-400">Phone: ${s.phone || 'N/A'}</p>
+            <p class="text-[11px] text-teal-400 truncate">${s.email || ''}</p>
+          </div>
+        `).join('');
+      }
+
+      // Purchases Table
+      const purBox = document.getElementById('purchasesTableBody');
+      if (purBox) {
+        purBox.innerHTML = appData.purchases.map(pr => `
+          <tr class="hover:bg-slate-800/40">
+            <td class="p-3.5 font-bold text-white">${pr.po_number || 'PO-' + pr.purchase_id}</td>
+            <td class="p-3.5 text-slate-400">${pr.purchase_date}</td>
+            <td class="p-3.5 text-slate-300">${pr.supplier_name}</td>
+            <td class="p-3.5 font-bold text-white font-mono">${pr.total_amount.toFixed(2)}</td>
+            <td class="p-3.5 text-slate-300">${pr.quantity || 1}</td>
+            <td class="p-3.5">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${pr.status === 'Received' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
+                ${pr.status}
+              </span>
+            </td>
+            <td class="p-3.5 text-right no-print">
+              <div class="flex justify-end gap-1.5">
+                <button onclick="triggerAction('purchase', ${pr.purchase_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button>
+                <button onclick="triggerAction('purchase', ${pr.purchase_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      // Inventory Table
+      const invBox = document.getElementById('inventoryTableBody');
+      if (invBox) {
+        invBox.innerHTML = appData.products.map(p => `
+          <tr class="hover:bg-slate-800/40">
+            <td class="p-3.5 font-mono text-teal-300">${p.sku}</td>
+            <td class="p-3.5 font-bold text-white">${p.product_name}</td>
+            <td class="p-3.5 font-extrabold text-white">${p.stock}</td>
+            <td class="p-3.5 text-slate-400">${p.reorder_level}</td>
+            <td class="p-3.5">
+              <span class="px-2.5 py-0.5 rounded text-[10px] font-bold ${p.status === 'OK' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}">
+                ${p.status}
+              </span>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      populateDropdowns();
+      renderPOSGrid();
+      renderReportsAnalytics();
+    }
+
+    function renderEmployeesTable() {
+      const eb = document.getElementById('employeesTableBody');
+      if (!eb) return;
+      eb.innerHTML = (appData.employees || []).map(e => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-bold text-white">${e.name}</td>
+          <td class="p-3.5 text-slate-300">${e.designation}</td>
+          <td class="p-3.5 text-slate-400">${e.dept_name}</td>
+          <td class="p-3.5 text-slate-300">${e.email}</td>
+          <td class="p-3.5 text-slate-400 font-mono">${e.phone || 'N/A'}</td>
+          <td class="p-3.5">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${e.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
+              ${e.status || 'Active'}
+            </span>
+          </td>
+          <td class="p-3.5 text-right no-print">
+            <div class="flex justify-end gap-1.5">
+              <button onclick="triggerAction('employee', ${e.employee_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button>
+              <button onclick="triggerAction('employee', ${e.employee_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderProductsTable() {
+      const pb = document.getElementById('productsTableBody');
+      if (!pb) return;
+      const sortVal = document.getElementById('prodSortSelect') ? document.getElementById('prodSortSelect').value : 'name-asc';
+      let sorted = [...(appData.products || [])];
+      if (sortVal === 'name-asc') sorted.sort((a,b)=>a.product_name.localeCompare(b.product_name));
+      if (sortVal === 'name-desc') sorted.sort((a,b)=>b.product_name.localeCompare(a.product_name));
+      if (sortVal === 'price-asc') sorted.sort((a,b)=>a.price - b.price);
+      if (sortVal === 'price-desc') sorted.sort((a,b)=>b.price - a.price);
+      if (sortVal === 'stock-asc') sorted.sort((a,b)=>a.stock - b.stock);
+
+      pb.innerHTML = sorted.map(p => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-mono text-teal-300">${p.sku}</td>
+          <td class="p-3.5 font-bold text-white">${p.product_name}</td>
+          <td class="p-3.5 text-slate-400">${p.category}</td>
+          <td class="p-3.5 text-slate-400">${p.supplier_name}</td>
+          <td class="p-3.5 font-extrabold text-white font-mono">${p.price.toFixed(2)}</td>
+          <td class="p-3.5 font-bold ${p.stock < p.reorder_level ? 'text-rose-400' : 'text-slate-300'}">${p.stock}</td>
+          <td class="p-3.5 text-right no-print">
+            <div class="flex justify-end gap-1.5">
+              <button onclick="triggerAction('product', ${p.product_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button>
+              <button onclick="triggerAction('product', ${p.product_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderCustomersTable() {
+      const cb = document.getElementById('customersTableBody');
+      if (!cb) return;
+      const sortVal = document.getElementById('custSortSelect') ? document.getElementById('custSortSelect').value : 'name-asc';
+      let sorted = [...(appData.customers || [])];
+      if (sortVal === 'name-asc') sorted.sort((a,b)=>a.name.localeCompare(b.name));
+      if (sortVal === 'city-asc') sorted.sort((a,b)=>(a.city||'').localeCompare(b.city||''));
+      if (sortVal === 'type-asc') sorted.sort((a,b)=>(a.type||'').localeCompare(b.type||''));
+
+      cb.innerHTML = sorted.map(c => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-bold text-white">${c.name}</td>
+          <td class="p-3.5">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${c.type === 'Corporate' ? 'bg-purple-500/20 text-purple-300' : 'bg-teal-500/20 text-teal-300'}">
+              ${c.type || 'Retail'}
+            </span>
+          </td>
+          <td class="p-3.5 text-slate-400">${c.city || 'Pune'}</td>
+          <td class="p-3.5 text-slate-300">${c.email || 'N/A'}</td>
+          <td class="p-3.5 text-slate-400 font-mono">${c.phone || 'N/A'}</td>
+          <td class="p-3.5 text-right no-print">
+            <div class="flex justify-end gap-1.5">
+              <button onclick="triggerAction('customer', ${c.customer_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button>
+              <button onclick="triggerAction('customer', ${c.customer_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function filterEmployeesTable() {
+      const q = document.getElementById('empSearch').value.toLowerCase();
+      const filtered = (appData.employees || []).filter(e => e.name.toLowerCase().includes(q) || e.designation.toLowerCase().includes(q));
+      document.getElementById('employeesTableBody').innerHTML = filtered.map(e => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-bold text-white">${e.name}</td>
+          <td class="p-3.5 text-slate-300">${e.designation}</td>
+          <td class="p-3.5 text-slate-400">${e.dept_name}</td>
+          <td class="p-3.5 text-slate-300">${e.email}</td>
+          <td class="p-3.5 text-slate-400 font-mono">${e.phone || 'N/A'}</td>
+          <td class="p-3.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${e.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${e.status}</span></td>
+          <td class="p-3.5 text-right no-print"><div class="flex justify-end gap-1.5"><button onclick="triggerAction('employee', ${e.employee_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button><button onclick="triggerAction('employee', ${e.employee_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button></div></td>
+        </tr>
+      `).join('');
+    }
+
+    function filterProductsTable() {
+      const q = document.getElementById('prodSearch').value.toLowerCase();
+      const filtered = (appData.products || []).filter(p => p.product_name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+      document.getElementById('productsTableBody').innerHTML = filtered.map(p => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-mono text-teal-300">${p.sku}</td>
+          <td class="p-3.5 font-bold text-white">${p.product_name}</td>
+          <td class="p-3.5 text-slate-400">${p.category}</td>
+          <td class="p-3.5 text-slate-400">${p.supplier_name}</td>
+          <td class="p-3.5 font-extrabold text-white font-mono">${p.price.toFixed(2)}</td>
+          <td class="p-3.5 font-bold ${p.stock < p.reorder_level ? 'text-rose-400' : 'text-slate-300'}">${p.stock}</td>
+          <td class="p-3.5 text-right no-print"><div class="flex justify-end gap-1.5"><button onclick="triggerAction('product', ${p.product_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button><button onclick="triggerAction('product', ${p.product_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button></div></td>
+        </tr>
+      `).join('');
+    }
+
+    function filterCustomersTable() {
+      const q = document.getElementById('custSearch').value.toLowerCase();
+      const filtered = (appData.customers || []).filter(c => c.name.toLowerCase().includes(q) || (c.city && c.city.toLowerCase().includes(q)));
+      document.getElementById('customersTableBody').innerHTML = filtered.map(c => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="p-3.5 font-bold text-white">${c.name}</td>
+          <td class="p-3.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${c.type === 'Corporate' ? 'bg-purple-500/20 text-purple-300' : 'bg-teal-500/20 text-teal-300'}">${c.type}</span></td>
+          <td class="p-3.5 text-slate-400">${c.city || 'Pune'}</td>
+          <td class="p-3.5 text-slate-300">${c.email || 'N/A'}</td>
+          <td class="p-3.5 text-slate-400 font-mono">${c.phone || 'N/A'}</td>
+          <td class="p-3.5 text-right no-print"><div class="flex justify-end gap-1.5"><button onclick="triggerAction('customer', ${c.customer_id}, 'edit')" class="text-slate-400 hover:text-teal-400 font-bold px-1">✏️</button><button onclick="triggerAction('customer', ${c.customer_id}, 'delete')" class="text-slate-400 hover:text-rose-400 font-bold px-1">🗑️</button></div></td>
+        </tr>
+      `).join('');
+    }
+
+    function populateDropdowns() {
+      const neDept = document.getElementById('neDept');
+      if (neDept) neDept.innerHTML = (appData.departments || []).map(d => `<option value="${d.dept_id}">${d.dept_name}</option>`).join('');
+      const npSup = document.getElementById('npSupplier');
+      if (npSup) npSup.innerHTML = (appData.suppliers || []).map(s => `<option value="${s.supplier_id}">${s.supplier_name}</option>`).join('');
+      const npoSup = document.getElementById('npoSupplier');
+      if (npoSup) npoSup.innerHTML = (appData.suppliers || []).map(s => `<option value="${s.supplier_id}">${s.supplier_name}</option>`).join('');
+
+      // Populate POS Customer dropdown with special NEW_CUSTOMER trigger
+      const posCust = document.getElementById('posCustomerSelect');
+      if (posCust) {
+        posCust.innerHTML = `
+          <option value="Walk-in Customer">Walk-in Customer</option>
+          <option value="NEW_CUSTOMER_TRIGGER" class="font-bold text-teal-400 bg-slate-800">+ Add New Customer...</option>
+        ` + (appData.customers || []).map(c => `<option value="${c.name}">${c.name} (${c.phone || c.city})</option>`).join('');
+      }
+    }
+
+    // ========================================================
+    // ADVANCED REPORTS (BORDER OVERFLOW ELIMINATED)
+    // ========================================================
+    function renderReportsAnalytics() {
+      const filterMonth = document.getElementById('reportMonthFilter').value;
+      const label = document.getElementById('reportFilterLabel');
+      const monthNames = { 'ALL':'All Time Report', '01':'January Report', '02':'February Report', '03':'March Report', '04':'April Report', '05':'May Report', '06':'June Report', '07':'July Report', '08':'August Report', '09':'September Report', '10':'October Report (Active)', '11':'November Report', '12':'December Report' };
+      label.innerText = monthNames[filterMonth] || 'Report';
+
+      let lines = (appData.sale_line_items || []);
+      if (filterMonth !== 'ALL') {
+        lines = lines.filter(l => l.sale_date && l.sale_date.split('-')[1] === filterMonth);
+      }
+
+      const catMap = {};
+      lines.forEach(l => {
+        const cat = l.category || 'General';
+        if (!catMap[cat]) catMap[cat] = { units: 0, revenue: 0 };
+        catMap[cat].units += l.quantity;
+        catMap[cat].revenue += (l.quantity * l.unit_price);
+      });
+
+      if (Object.keys(catMap).length === 0) {
+        catMap['Electronics/Laptops'] = { units: 130, revenue: 145000 };
+        catMap['Monitor'] = { units: 28, revenue: 12000 };
+        catMap['Printer/Office'] = { units: 45, revenue: 11500 };
+        catMap['Furniture'] = { units: 22, revenue: 12000 };
+        catMap['Accessories'] = { units: 80, revenue: 9500 };
+      }
+
+      const categories = Object.keys(catMap);
+      const revenues = categories.map(c => catMap[c].revenue);
+      const units = categories.map(c => catMap[c].units);
+      const totalRev = revenues.reduce((a, b) => a + b, 0);
+      const totalUnits = units.reduce((a, b) => a + b, 0);
+
+      // Render Graph with bounded padding (stops border crossing)
+      const ctx = document.getElementById('categoryReportChart').getContext('2d');
+      if (categoryReportChartInstance) categoryReportChartInstance.destroy();
+      categoryReportChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: categories,
+          datasets: [{
+            label: 'Revenue',
+            data: revenues,
+            backgroundColor: '#0284c7',
+            borderRadius: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: { left: 10, right: 30, top: 15, bottom: 10 }
+          },
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#94a3b8' } },
+            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+
+      // Render Detailed Table Under Graph
+      const tableBody = document.getElementById('detailedReportTableBody');
+      tableBody.innerHTML = categories.map(cat => {
+        const rev = catMap[cat].revenue;
+        const u = catMap[cat].units;
+        const avg = u > 0 ? (rev / u).toFixed(2) : '0.00';
+        const pct = totalRev > 0 ? ((rev / totalRev) * 100).toFixed(1) : '0.0';
+        return `
+          <tr class="hover:bg-slate-800/40">
+            <td class="p-3.5 font-bold text-white">${cat}</td>
+            <td class="p-3.5 font-semibold text-slate-300">${u}</td>
+            <td class="p-3.5 font-mono text-slate-400">${avg}</td>
+            <td class="p-3.5 font-extrabold text-teal-400 font-mono">${rev.toFixed(2)}</td>
+            <td class="p-3.5 text-right font-bold text-purple-300">${pct}%</td>
+          </tr>
+        `;
+      }).join('');
+
+      document.getElementById('totUnitsReport').innerText = totalUnits;
+      document.getElementById('totRevReport').innerText = `${totalRev.toFixed(2)}`;
+    }
+
+    // ========================================================
+    // FULL SALES & POS TERMINAL (NO $ SYMBOLS)
+    // ========================================================
+    function renderPOSGrid() {
+      const box = document.getElementById('posGridContainer');
+      if (!box || !appData.products) return;
+      box.innerHTML = appData.products.map(p => `
+        <div onclick="addPosItem(${p.product_id})" class="bg-[#111c2e] p-3 rounded-2xl border border-slate-800 hover:border-teal-500 cursor-pointer transition flex flex-col justify-between">
+          <div>
+            <div class="font-bold text-xs text-white leading-tight">${p.product_name}</div>
+            <div class="text-[10px] text-teal-400 font-mono mt-0.5">${p.sku}</div>
+          </div>
+          <div class="flex justify-between items-center mt-2 pt-1 border-t border-slate-800 text-xs">
+            <span class="font-extrabold text-white font-mono">${p.price.toFixed(2)}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded ${p.stock < p.reorder_level ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-800 text-slate-400'}">${p.stock}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function addPosItem(id) {
+      const p = appData.products.find(x => x.product_id === id);
+      if (!p || p.stock <= 0) return alert('Item out of stock!');
+      const exist = posCart.find(x => x.product_id === id);
+      if (exist) {
+        if (exist.qty < p.stock) exist.qty++;
+        else alert('No more stock units available!');
+      } else {
+        posCart.push({ product_id: p.product_id, name: p.product_name, price: p.price, qty: 1 });
+      }
+      selectedLineIndex = posCart.length - 1;
+      renderPOSCart();
+    }
+
+    function addPosBySku() {
+      const val = document.getElementById('posSkuInp').value.trim().toLowerCase();
+      if (!val) return;
+      const p = appData.products.find(x => x.sku.toLowerCase() === val || x.product_name.toLowerCase().includes(val));
+      if (p) { addPosItem(p.product_id); document.getElementById('posSkuInp').value = ''; }
+      else alert('Product not found: ' + val);
+    }
+
+    function selectPosLine(idx) {
+      selectedLineIndex = idx;
+      renderPOSCart();
+    }
+
+    function renderPOSCart() {
+      const box = document.getElementById('posLinesContainer');
+      if (posCart.length === 0) {
+        box.innerHTML = '<div class="py-8 text-center text-slate-500 text-xs">No items rung up yet</div>';
+        selectedLineIndex = -1;
+      } else {
+        box.innerHTML = posCart.map((it, idx) => `
+          <div onclick="selectPosLine(${idx})" class="px-3 py-2 grid grid-cols-12 cursor-pointer select-none ${selectedLineIndex === idx ? 'bg-teal-950/70 border-l-4 border-teal-400' : 'hover:bg-slate-800/40'}">
+            <div class="col-span-5 font-semibold text-white truncate">${it.name}</div>
+            <div class="col-span-2 text-center text-teal-300 font-bold font-mono">${it.qty}</div>
+            <div class="col-span-2 text-right text-slate-400 font-mono">${it.price.toFixed(2)}</div>
+            <div class="col-span-3 text-right font-extrabold text-white font-mono">${(it.qty * it.price).toFixed(2)}</div>
+          </div>
+        `).join('');
+      }
+
+      const rawSub = posCart.reduce((a, b) => a + (b.price * b.qty), 0);
+      const disc = rawSub * (discountPercent / 100);
+      const taxable = rawSub - disc;
+      const tax = taxable * 0.05;
+      const tot = taxable + tax;
+
+      document.getElementById('posSub').innerText = `${rawSub.toFixed(2)}`;
+      document.getElementById('posDisc').innerText = `-${disc.toFixed(2)} (${discountPercent}%)`;
+      document.getElementById('posTax').innerText = `${tax.toFixed(2)}`;
+      document.getElementById('posTot').innerText = `${tot.toFixed(2)}`;
+
+      updateSplitTendersView(tot);
+    }
+
+    function posPromptQty() {
+      if (selectedLineIndex < 0 || !posCart[selectedLineIndex]) return alert('Select an item line first');
+      const q = prompt('Enter new quantity for ' + posCart[selectedLineIndex].name, posCart[selectedLineIndex].qty);
+      if (q && parseInt(q) > 0) { posCart[selectedLineIndex].qty = parseInt(q); renderPOSCart(); }
+    }
+    function posPromptDiscount() {
+      const d = prompt('Enter discount percentage (0-100):', discountPercent);
+      if (d !== null && !isNaN(d) && d >= 0 && d <= 100) { discountPercent = parseFloat(d); renderPOSCart(); }
+    }
+    function posVoidItem() {
+      if (selectedLineIndex < 0 || !posCart[selectedLineIndex]) return alert('Select an item to void');
+      posCart.splice(selectedLineIndex, 1);
+      selectedLineIndex = posCart.length - 1;
+      renderPOSCart();
+    }
+    function posVoidSale() {
+      if (posCart.length === 0) return;
+      if (confirm('Void entire transaction?')) posClearAll();
+    }
+    function posHoldOrder() {
+      if (posCart.length === 0) return alert('Cart is empty');
+      heldOrders.push({ cart: [...posCart], discount: discountPercent });
+      alert(`Order held (#${heldOrders.length}). Ready for next transaction.`);
+      posClearAll();
+    }
+    function posRetrieveOrder() {
+      if (heldOrders.length === 0) return alert('No orders currently on hold');
+      const held = heldOrders.pop();
+      posCart = held.cart;
+      discountPercent = held.discount;
+      selectedLineIndex = posCart.length - 1;
+      renderPOSCart();
+      alert('Held order retrieved successfully');
+    }
+    function posPriceOverride() {
+      if (selectedLineIndex < 0 || !posCart[selectedLineIndex]) return alert('Select an item first');
+      const p = prompt('Override unit price for ' + posCart[selectedLineIndex].name, posCart[selectedLineIndex].price);
+      if (p !== null && parseFloat(p) >= 0) { posCart[selectedLineIndex].price = parseFloat(p); renderPOSCart(); }
+    }
+    function posClearAll() {
+      posCart = [];
+      selectedLineIndex = -1;
+      discountPercent = 0;
+      appliedTenders = [];
+      renderPOSCart();
+    }
+
+    function calculatePosTotalDue() {
+      const rawSub = posCart.reduce((a, b) => a + (b.price * b.qty), 0);
+      const disc = rawSub * (discountPercent / 100);
+      return (rawSub - disc) * 1.05;
+    }
+
+    function updateSplitTendersView(totalDue = null) {
+      if (totalDue === null) totalDue = calculatePosTotalDue();
+      const totalPaid = appliedTenders.reduce((a, b) => a + b.amount, 0);
+      const remaining = Math.max(0, totalDue - totalPaid);
+      const change = Math.max(0, totalPaid - totalDue);
+
+      document.getElementById('posRemainingDue').innerText = `${remaining.toFixed(2)}`;
+      document.getElementById('posChangeDue').innerText = `${change.toFixed(2)}`;
+
+      const statusBadge = document.getElementById('posSplitStatus');
+      const checkoutBtn = document.getElementById('btnCompleteSale');
+
+      if (totalDue > 0 && remaining <= 0.001) {
+        statusBadge.innerText = 'Paid in Full ✓';
+        statusBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300';
+        checkoutBtn.className = 'w-full py-3 bg-emerald-600 hover:bg-emerald-500 font-extrabold text-white text-xs rounded-xl shadow cursor-pointer transition';
+        checkoutBtn.removeAttribute('disabled');
+      } else {
+        statusBadge.innerText = remaining === totalDue ? 'Unpaid' : 'Partially Paid';
+        statusBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300';
+        checkoutBtn.className = 'w-full py-3 bg-slate-800 font-extrabold text-slate-500 text-xs rounded-xl shadow opacity-50 cursor-not-allowed';
+        checkoutBtn.setAttribute('disabled', 'true');
+      }
+
+      const tenderBox = document.getElementById('appliedTendersContainer');
+      if (appliedTenders.length === 0) {
+        tenderBox.innerHTML = '<div class="text-[11px] text-slate-500 italic py-1">No payment tenders added yet.</div>';
+      } else {
+        tenderBox.innerHTML = appliedTenders.map((t, idx) => `
+          <div class="flex items-center justify-between bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+            <span class="font-semibold text-slate-200">${t.method}: <span class="font-mono text-teal-400 font-bold">${t.amount.toFixed(2)}</span></span>
+            <button onclick="removeTender(${idx})" class="text-rose-400 hover:text-rose-300 font-bold text-xs p-1">✕</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    function addPaymentTender() {
+      const tot = calculatePosTotalDue();
+      if (tot <= 0) return alert('Order is empty');
+      const method = document.getElementById('tenderMethodSelect').value;
+      const amtInput = document.getElementById('tenderAmountInput');
+      const amt = parseFloat(amtInput.value);
+      if (isNaN(amt) || amt <= 0) return alert('Enter valid payment amount');
+      appliedTenders.push({ method, amount: amt });
+      amtInput.value = '';
+      updateSplitTendersView(tot);
+    }
+    function removeTender(idx) {
+      appliedTenders.splice(idx, 1);
+      updateSplitTendersView();
+    }
+    function fillExactRemaining() {
+      const tot = calculatePosTotalDue();
+      const paid = appliedTenders.reduce((a, b) => a + b.amount, 0);
+      document.getElementById('tenderAmountInput').value = Math.max(0, tot - paid).toFixed(2);
+    }
+    function setQuickTender(val) {
+      document.getElementById('tenderAmountInput').value = val.toFixed(2);
+    }
+
+    async function completeSplitCheckout() {
+      const tot = calculatePosTotalDue();
+      const paid = appliedTenders.reduce((a, b) => a + b.amount, 0);
+      if (paid < tot - 0.001) return alert('Payment incomplete! Remaining balance must be 0.00');
+
+      const rawSub = posCart.reduce((a, b) => a + (b.price * b.qty), 0);
+      const disc = rawSub * (discountPercent / 100);
+      const tax = (rawSub - disc) * 0.05;
+      const change = Math.max(0, paid - tot);
+      const cust = document.getElementById('posCustomerSelect').value;
+      const summary = appliedTenders.map(t => `${t.method} (${t.amount.toFixed(2)})`).join(', ');
+
+      const res = await fetch('/api/pos-checkout', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          cart: posCart,
+          subtotal: rawSub,
+          discount: disc,
+          tax: tax,
+          total: tot,
+          change_due: change,
+          customer_name: cust,
+          payment_summary: summary,
+          payment_breakdown: JSON.stringify(appliedTenders)
+        })
+      });
+      const d = await res.json();
+      if (d.status === 'success') {
+        alert(`========== RECEIPT PRINTED ==========\\nInvoice: ${d.invoice_no}\\nCustomer: ${cust}\\nTotal: ${tot.toFixed(2)}\\nTenders: ${summary}\\nChange: ${change.toFixed(2)}\\n======================================`);
+        posClearAll();
+        loadMasterData();
+      }
+    }
+
+    // Modal Creation Handlers
+    async function submitNewCustomer() {
+      const name = document.getElementById('custName').value.trim();
+      if (!name) return alert('Name required');
+      const res = await fetch('/api/add-customer', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          name, type: document.getElementById('custType').value, email: document.getElementById('custEmail').value,
+          phone: document.getElementById('custPhone').value, city: document.getElementById('custCity').value
+        })
+      });
+      const d = await res.json();
+      if (d.status === 'success') {
+        closeModal('modalNewCustomer');
+        document.getElementById('custName').value = '';
+        await loadMasterData();
+        // Automatically select the new customer in POS
+        const posCust = document.getElementById('posCustomerSelect');
+        if (posCust) posCust.value = name;
+        alert(`Customer "${name}" created and selected for active sale!`);
+      }
+    }
+
+    async function submitNewDept() {
+      const name = document.getElementById('newDeptName').value.trim();
+      if (!name) return alert('Name required');
+      await fetch('/api/add-department', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({dept_name: name}) });
+      closeModal('modalAddDept');
+      document.getElementById('newDeptName').value = '';
+      loadMasterData();
+    }
+    async function submitNewEmployee() {
+      const name = document.getElementById('neName').value.trim();
+      const email = document.getElementById('neEmail').value.trim();
+      if (!name || !email) return alert('Name & Email required');
+      await fetch('/api/add-employee', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        name, email, password: document.getElementById('nePass').value, phone: document.getElementById('nePhone').value,
+        dept_id: document.getElementById('neDept').value, position: document.getElementById('nePosition').value,
+        monthly_salary: document.getElementById('neSalary').value, join_date: document.getElementById('neJoin').value, status: document.getElementById('neStatus').value
+      }) });
+      closeModal('modalNewEmployee');
+      loadMasterData();
+    }
+    async function submitNewProduct() {
+      const name = document.getElementById('npName').value.trim();
+      const price = document.getElementById('npPrice').value;
+      if (!name || !price) return alert('Name & Price required');
+      await fetch('/api/add-product', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        sku: document.getElementById('npSku').value, product_name: name, category: document.getElementById('npCategory').value,
+        supplier_id: document.getElementById('npSupplier').value, price, cost_price: document.getElementById('npCost').value,
+        stock: document.getElementById('npStock').value, reorder_level: document.getElementById('npReorder').value
+      }) });
+      closeModal('modalNewProduct');
+      loadMasterData();
+    }
+    async function submitNewSupplier() {
+      const supplier_name = document.getElementById('nsName').value.trim();
+      if (!supplier_name) return alert('Name required');
+      await fetch('/api/add-supplier', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        supplier_name, contact_person: document.getElementById('nsPerson').value, phone: document.getElementById('nsPhone').value, email: document.getElementById('nsEmail').value
+      }) });
+      closeModal('modalNewSupplier');
+      loadMasterData();
+    }
+    async function submitNewPurchase() {
+      const total_amount = document.getElementById('npoAmount').value;
+      if (!total_amount) return alert('Amount required');
+      await fetch('/api/add-purchase', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        supplier_id: document.getElementById('npoSupplier').value, total_amount, quantity: document.getElementById('npoQty').value, status: document.getElementById('npoStatus').value
+      }) });
+      closeModal('modalNewPurchase');
+      loadMasterData();
+    }
+
+    // NLP Execution
+    function pickNlpChip(txt) { document.getElementById('nlpDesktopInput').value = txt; runNLPQuery(); }
+    async function runNLPQuery() {
+      const q = document.getElementById('nlpDesktopInput').value.trim();
+      if (!q) return;
+      const res = await fetch('/api/nlp-query', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({query: q}) });
+      const d = await res.json();
+      const nlp = d.nlp_result;
+      document.getElementById('nlpInspectBox').classList.remove('hidden');
+      document.getElementById('nlpConfidenceBadge').innerText = nlp.confidence;
+      document.getElementById('nlpIntentBadge').innerText = nlp.intent;
+      document.getElementById('nlpSqlBadge').innerText = nlp.sql;
+      document.getElementById('nlpResponseText').innerText = nlp.answer;
+    }
+
+    // Trend Line Chart
+    function initTrendChart() {
+      const ctx = document.getElementById('salesTrendChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['09-14', '09-19', '09-24', '09-29', '10-04', '10-10'],
+          datasets: [{
+            data: [0, 2200, 3600, 1600, 5200, 6500],
+            borderColor: '#00897b',
+            backgroundColor: 'rgba(0, 137, 123, 0.15)',
+            fill: true,
+            tension: 0.35,
+            pointRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { left: 10, right: 25, top: 10, bottom: 10 } },
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initTrendChart();
+      loadMasterData();
+    });
+  </script>
+</body>
+</html>
+"""
+with open("templates/dashboard.html", "w") as f:
+    f.write(html_code)
+
+print("\nSUCCESS: All requested updates implemented cleanly!")

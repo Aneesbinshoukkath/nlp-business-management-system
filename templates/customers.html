@@ -1,0 +1,14 @@
+{% extends "layout.html" %}
+{% set title = "Customers" %}
+{% block content %}
+<div class="space-y-3">
+  {% for c in customers %}
+  <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex items-center justify-between">
+    <div>
+      <h3 class="font-bold text-sm text-slate-900">{{ c.name }}</h3>
+      <p class="text-xs text-slate-400">{{ c.phone }} · {{ c.email }}</p>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

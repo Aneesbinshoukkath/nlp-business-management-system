@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NLP Business Management System</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+  <!-- Top Navigation -->
+  <header class="bg-slate-800 border-b border-slate-700 py-4 px-6 flex justify-between items-center sticky top-0 z-50">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow">BIZ</div>
+      <div>
+        <h1 class="font-bold text-lg leading-tight">Business Management System</h1>
+        <p class="text-xs text-slate-400">NLP & PWA Internal Portal</p>
+      </div>
+    </div>
+    <span class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold">Active Session</span>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-6 space-y-6">
+    <!-- NLP Query Section -->
+    <section class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
+      <div class="mb-3">
+        <h2 class="text-lg font-bold flex items-center gap-2 text-blue-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+          NLP Business Assistant
+        </h2>
+        <p class="text-xs text-slate-400">Ask questions in plain English to query sales, inventory, or employees.</p>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="nlpInput" type="text" placeholder="e.g. Show today's sales OR Which products have less than 10 items?" 
+          class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500 text-white placeholder-slate-500">
+        <button onclick="askNLP()" class="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-3 rounded-lg text-sm transition">
+          Ask
+        </button>
+      </div>
+
+      <!-- Quick suggestions -->
+      <div class="flex flex-wrap gap-2 mt-3 text-xs">
+        <span class="text-slate-400 self-center">Try:</span>
+        <button onclick="setQuery('Show today\'s sales')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Show today's sales</button>
+        <button onclick="setQuery('Which products have less than 10 items?')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Which products have less than 10 items?</button>
+        <button onclick="setQuery('How many laptops are in stock?')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">How many laptops are in stock?</button>
+        <button onclick="setQuery('Which product has the highest sales?')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Which product has the highest sales?</button>
+        <button onclick="setQuery('Who are the employees in the sales department?')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300">Who are the employees in the sales department?</button>
+      </div>
+
+      <!-- Answer Box -->
+      <div id="nlpResult" class="mt-4 p-4 rounded-lg bg-slate-900 border border-slate-700 hidden text-sm"></div>
+    </section>
+
+    <!-- Operational Data Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Inventory Section -->
+      <section class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow">
+        <h3 class="font-bold text-base mb-3 text-slate-200">Current Products & Stock</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-700/50 text-slate-400 uppercase text-[10px]">
+              <tr>
+                <th class="p-2">Product</th>
+                <th class="p-2">Price</th>
+                <th class="p-2 text-right">Stock</th>
+              </tr>
+            </thead>
+            <tbody id="productTable" class="divide-y divide-slate-700">
+              <tr><td colspan="3" class="p-2 text-center text-slate-500">Loading records...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Employees Section -->
+      <section class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow">
+        <h3 class="font-bold text-base mb-3 text-slate-200">Department Directory</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-700/50 text-slate-400 uppercase text-[10px]">
+              <tr>
+                <th class="p-2">Employee</th>
+                <th class="p-2">Department</th>
+                <th class="p-2">Designation</th>
+              </tr>
+            </thead>
+            <tbody id="employeeTable" class="divide-y divide-slate-700">
+              <tr><td colspan="3" class="p-2 text-center text-slate-500">Loading records...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    function setQuery(text) {
+      document.getElementById('nlpInput').value = text;
+      askNLP();
+    }
+
+    async function askNLP() {
+      const input = document.getElementById('nlpInput');
+      const box = document.getElementById('nlpResult');
+      const query = input.value.trim();
+      if (!query) return;
+
+      box.classList.remove('hidden');
+      box.innerHTML = '<span class="text-blue-400">Processing query with NLP Engine...</span>';
+
+      try {
+        const res = await fetch('/api/nlp-query', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({query: query})
+        });
+        const data = await res.json();
+        box.innerHTML = `<span class="font-semibold text-emerald-400">System Response:</span><p class="mt-1 text-slate-200">${data.response}</p>`;
+      } catch (err) {
+        box.innerHTML = '<span class="text-rose-400">Failed to connect to backend server.</span>';
+      }
+    }
+
+    async function loadData() {
+      const res = await fetch('/api/dashboard-data');
+      const data = await res.json();
+      
+      const pTable = document.getElementById('productTable');
+      pTable.innerHTML = data.products.map(p => `
+        <tr>
+          <td class="p-2 font-medium">${p.product_name}</td>
+          <td class="p-2">₹${p.price}</td>
+          <td class="p-2 text-right">
+            <span class="px-2 py-0.5 rounded text-[11px] ${p.stock < 10 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300'}">
+              ${p.stock}
+            </span>
+          </td>
+        </tr>
+      `).join('');
+
+      const eTable = document.getElementById('employeeTable');
+      eTable.innerHTML = data.employees.map(e => `
+        <tr>
+          <td class="p-2 font-medium">${e.name}</td>
+          <td class="p-2 text-slate-400">${e.dept_name}</td>
+          <td class="p-2 text-slate-400">${e.designation}</td>
+        </tr>
+      `).join('');
+    }
+
+    loadData();
+
+    // Register PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(console.error);
+    }
+  </script>
+</body>
+</html>

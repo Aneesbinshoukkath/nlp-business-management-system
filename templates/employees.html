@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+{% set title = "Employees" %}
+{% block content %}
+<div class="space-y-3">
+  {% for e in employees %}
+  <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex items-center justify-between">
+    <div>
+      <h3 class="font-bold text-sm text-slate-900">{{ e.name }}</h3>
+      <p class="text-xs text-slate-400">{{ e.dept_name }} · {{ e.designation }}</p>
+      <p class="text-[11px] text-slate-400 mt-0.5">{{ e.email }}</p>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

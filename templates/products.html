@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+{% set title = "Products" %}
+{% block content %}
+<div class="flex justify-between items-center mb-2">
+  <span class="text-xs text-slate-500">{{ products|length }} items in catalog</span>
+  <button onclick="document.getElementById('addModal').classList.remove('hidden')" class="bg-[#00897b] text-white text-xs px-3 py-1.5 rounded-xl font-semibold shadow hover:bg-[#00796b]">
+    + Add Product
+  </button>
+</div>
+
+<div class="space-y-3">
+  {% for p in products %}
+  <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex items-center justify-between">
+    <div>
+      <h3 class="font-bold text-sm text-slate-900">{{ p.product_name }}</h3>
+      <p class="text-xs text-slate-400">{{ p.category }} · ${{ p.price }}</p>
+    </div>
+    <span class="text-xs font-bold px-2.5 py-1 rounded-full {% if p.stock < 10 %}bg-rose-100 text-rose-600{% else %}bg-slate-100 text-slate-700{% endif %}">
+      {{ p.stock }} units
+    </span>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Modal -->
+<div id="addModal" class="fixed inset-0 bg-slate-900/50 hidden flex items-center justify-center p-4 z-50">
+  <form action="/products" method="POST" class="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-xl">
+    <h3 class="font-bold text-base text-slate-900">Add New Product</h3>
+    <input type="text" name="name" placeholder="Product Name" required class="w-full text-xs p-3 border rounded-xl">
+    <input type="text" name="category" placeholder="Category" required class="w-full text-xs p-3 border rounded-xl">
+    <input type="number" step="0.01" name="price" placeholder="Price ($)" required class="w-full text-xs p-3 border rounded-xl">
+    <input type="number" name="stock" placeholder="Initial Stock" required class="w-full text-xs p-3 border rounded-xl">
+    <div class="flex gap-2">
+      <button type="button" onclick="document.getElementById('addModal').classList.add('hidden')" class="w-1/2 bg-slate-100 text-slate-700 text-xs py-2 rounded-xl">Cancel</button>
+      <button type="submit" class="w-1/2 bg-[#00897b] text-white text-xs py-2 rounded-xl font-semibold">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% set title = "Reports" %}
+{% block content %}
+<div class="space-y-4">
+  <div class="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm">
+    <h3 class="text-xs text-slate-400 uppercase font-bold tracking-wider">Gross Revenue</h3>
+    <p class="text-3xl font-extrabold text-slate-900 mt-1">${{ "%.2f"|format(summary.revenue or 0) }}</p>
+    <p class="text-xs text-slate-500 mt-2">Across {{ summary.total_sales_count }} recorded orders</p>
+  </div>
+</div>
+{% endblock %}

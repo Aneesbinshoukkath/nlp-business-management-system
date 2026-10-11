@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+{% set title = "Inventory" %}
+{% block content %}
+<div class="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm">
+  <h2 class="text-sm font-bold text-slate-900 mb-4">Stock Levels</h2>
+  <div class="space-y-3">
+    {% for p in products %}
+    <div class="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
+      <div>
+        <div class="text-xs font-semibold text-slate-900">{{ p.product_name }}</div>
+        <div class="text-[11px] text-slate-400">{{ p.category }}</div>
+      </div>
+      <span class="text-[11px] font-bold px-2 py-0.5 rounded-full {% if p.stock <= 4 %}bg-rose-100 text-rose-600{% elif p.stock < 10 %}bg-amber-100 text-amber-700{% else %}bg-emerald-100 text-emerald-700{% endif %}">
+        {{ p.stock }} in stock
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
